@@ -1,0 +1,133 @@
+// ================================
+// ZONAS PERSONALIZADAS BAAPA – AJUSTADAS
+// ================================
+var dptos = ee.FeatureCollection('FAO/GAUL/2015/level1');
+
+// Función para cortar un polígono en subzonas por direcciones
+function dividirSector(geom, direcciones) {
+  var bounds = geom.bounds();
+  var coords = bounds.coordinates().get(0);
+  var lons = ee.List(coords).map(function(c) { return ee.Number(ee.List(c).get(0)); });
+  var lats = ee.List(coords).map(function(c) { return ee.Number(ee.List(c).get(1)); });
+  var minLon = ee.Number(lons.reduce(ee.Reducer.min()));
+  var maxLon = ee.Number(lons.reduce(ee.Reducer.max()));
+  var minLat = ee.Number(lats.reduce(ee.Reducer.min()));
+  var maxLat = ee.Number(lats.reduce(ee.Reducer.max()));
+  var lonMid = minLon.add(maxLon).divide(2);
+  var latMid = minLat.add(maxLat).divide(2);
+
+  var subs = [];
+  if (direcciones.indexOf('norte') > -1)    subs.push(geom.intersection(ee.Geometry.Rectangle([minLon, latMid, maxLon, maxLat]),1));
+  if (direcciones.indexOf('sur') > -1)      subs.push(geom.intersection(ee.Geometry.Rectangle([minLon, minLat, maxLon, latMid]),1));
+  if (direcciones.indexOf('este') > -1)     subs.push(geom.intersection(ee.Geometry.Rectangle([lonMid, minLat, maxLon, maxLat]),1));
+  if (direcciones.indexOf('oeste') > -1)    subs.push(geom.intersection(ee.Geometry.Rectangle([minLon, minLat, lonMid, maxLat]),1));
+  if (direcciones.indexOf('noreste') > -1)  subs.push(geom.intersection(ee.Geometry.Rectangle([lonMid, latMid, maxLon, maxLat]),1));
+  if (direcciones.indexOf('sureste') > -1)  subs.push(geom.intersection(ee.Geometry.Rectangle([lonMid, minLat, maxLon, latMid]),1));
+
+  return ee.Geometry(subs.reduce(function(acc, g) {
+    return ee.Geometry(acc).union(g);
+  }));
+}
+
+// ================================
+// CONSTRUCCIÓN DE ZONAS
+// ================================
+
+// Caaguazú Este
+var caaguazuEste = dividirSector(
+  dptos.filter(ee.Filter.eq('ADM1_NAME', 'Caaguazu')).first().geometry(),
+  ['este','noreste','sureste']
+);
+
+// Itapúa completo
+var itapuaCompleto = dptos.filter(ee.Filter.eq('ADM1_NAME', 'Itapua')).first().geometry();
+
+// Caazapá Este
+var caazapaEste = dividirSector(
+  dptos.filter(ee.Filter.eq('ADM1_NAME', 'Caazapa')).first().geometry(),
+  ['este','noreste','sureste']
+);
+
+// San Pedro Sureste
+var sanPedroSE = dptos.filter(ee.Filter.eq('ADM1_NAME', 'San Pedro'))
+  .map(function(f){
+    var geom = f.geometry().intersection(
+      ee.Geometry.Rectangle([-56.5, -25.4, -55.2, -23.3])
+    );
+    return ee.Feature(geom);
+  }).first().geometry();
+
+// Alto Paraná completo
+var altoParana = dptos.filter(ee.Filter.eq('ADM1_NAME', 'Alto Parana')).first().geometry();
+
+// Canindeyú completo
+var canindeyuCompleto = dptos.filter(ee.Filter.eq('ADM1_NAME', 'Canindeyu')).first().geometry();
+
+// ✅ Amambay SUR CORRECTO
+var amambaySur = dptos.filter(ee.Filter.eq('ADM1_NAME', 'Amambay'))
+  .map(function(f){
+    var geom = f.geometry().intersection(
+      ee.Geometry.Rectangle([-56.3, -24.2, -55.3, -23.3])
+    );
+    return ee.Feature(geom);
+  }).first().geometry();
+
+// ================================
+// EMPAQUETAR ZONAS
+// ================================
+var zonasGeoms = [
+  caaguazuEste,
+  itapuaCompleto,
+  caazapaEste,
+  sanPedroSE,
+  altoParana,
+  canindeyuCompleto,
+  amambaySur
+];
+
+var nombres = ['Caaguazu', 'Itapua', 'Caazapa', 'San Pedro', 'Alto Parana', 'Canindeyu', 'Amambay'];
+
+var zonas = ee.FeatureCollection(
+  zonasGeoms.map(function(g, i){
+    return ee.Feature(g, {nombre: nombres[i]});
+  })
+);
+
+// ================================
+// VISUALIZACIÓN
+// ================================
+var styled = zonas.style({
+  color: 'FF0000',
+  width: 0.5,
+  fillColor: '#3370FF70'
+});
+
+var paises = ee.FeatureCollection("FAO/GAUL/2015/level0");
+var dptos_all = ee.FeatureCollection("FAO/GAUL/2015/level1");
+
+var py = paises.filter(ee.Filter.eq("ADM0_NAME", "Paraguay"));
+Map.addLayer(py.style({fillColor: 'FFFFFF', color: 'FFFFFF', width: 0}), {}, "PY blanco");
+
+var vecinos = paises.filter(ee.Filter.neq("ADM0_NAME", "Paraguay"));
+Map.addLayer(vecinos.style({fillColor: 'E6E6E6', color: 'BBBBBB', width: 1.1}), {}, "Vecinos gris");
+
+var dptos_vecinos = dptos_all.filter(ee.Filter.neq("ADM0_NAME", "Paraguay"));
+Map.addLayer(dptos_vecinos.style({color: 'AAAAAA', width: 0.7, fillColor: '00000000'}), {}, "Vecinos (línea interna)");
+
+var dptos_py = dptos_all.filter(ee.Filter.eq("ADM0_NAME", "Paraguay"));
+Map.addLayer(dptos_py.style({color: '222222', width: 1, fillColor: '00000000'}), {}, "Departamental PY");
+
+Map.addLayer(styled, {}, "Zonas delimitadas");
+Map.centerObject(zonas, 8);
+
+// ================================
+// EXPORTACIÓN A KML
+// ================================
+Export.table.toDrive({
+  collection: zonas,
+  description: 'Zonas_BAAPA_Final_KML',
+  folder: 'EarthEngine',
+  fileNamePrefix: 'zonas_baapa_final',
+  fileFormat: 'KML'
+});
+
