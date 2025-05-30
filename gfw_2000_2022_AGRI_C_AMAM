@@ -1,0 +1,100 @@
+// =====================================
+// BOSQUE GFW – 2000 A 2022 PARA ZONAS BAAPA
+// =====================================
+
+// 1. Cargar imagen Hansen Global Forest Change
+var gfc = ee.Image('UMD/hansen/global_forest_change_2022_v1_10');
+var canopyThresh = 30;
+var pixelHa = ee.Image.pixelArea().divide(1e4);
+
+// 2. Cargar zonas personalizadas ya definidas
+var dptos = ee.FeatureCollection('FAO/GAUL/2015/level1');
+
+function dividirSector(geom, direcciones) {
+  var bounds = geom.bounds();
+  var coords = bounds.coordinates().get(0);
+  var lons = ee.List(coords).map(function(c) { return ee.Number(ee.List(c).get(0)); });
+  var lats = ee.List(coords).map(function(c) { return ee.Number(ee.List(c).get(1)); });
+  var minLon = ee.Number(lons.reduce(ee.Reducer.min()));
+  var maxLon = ee.Number(lons.reduce(ee.Reducer.max()));
+  var minLat = ee.Number(lats.reduce(ee.Reducer.min()));
+  var maxLat = ee.Number(lats.reduce(ee.Reducer.max()));
+  var lonMid = minLon.add(maxLon).divide(2);
+  var latMid = minLat.add(maxLat).divide(2);
+  var subs = [];
+  if (direcciones.indexOf('norte') > -1) subs.push(geom.intersection(ee.Geometry.Rectangle([minLon, latMid, maxLon, maxLat]),1));
+  if (direcciones.indexOf('sur') > -1) subs.push(geom.intersection(ee.Geometry.Rectangle([minLon, minLat, maxLon, latMid]),1));
+  if (direcciones.indexOf('este') > -1) subs.push(geom.intersection(ee.Geometry.Rectangle([lonMid, minLat, maxLon, maxLat]),1));
+  if (direcciones.indexOf('oeste') > -1) subs.push(geom.intersection(ee.Geometry.Rectangle([minLon, minLat, lonMid, maxLat]),1));
+  if (direcciones.indexOf('noreste') > -1) subs.push(geom.intersection(ee.Geometry.Rectangle([lonMid, latMid, maxLon, maxLat]),1));
+  if (direcciones.indexOf('sureste') > -1) subs.push(geom.intersection(ee.Geometry.Rectangle([lonMid, minLat, maxLon, latMid]),1));
+  return ee.Geometry(subs.reduce(function(acc, g) {
+    return ee.Geometry(acc).union(g);
+  }));
+}
+
+var caaguazuEste = dividirSector(dptos.filter(ee.Filter.eq('ADM1_NAME', 'Caaguazu')).first().geometry(), ['este','noreste','sureste']);
+var itapuaCompleto = dptos.filter(ee.Filter.eq('ADM1_NAME', 'Itapua')).first().geometry();
+var caazapaEste = dividirSector(dptos.filter(ee.Filter.eq('ADM1_NAME', 'Caazapa')).first().geometry(), ['este','noreste','sureste']);
+var sanPedroSE = dptos.filter(ee.Filter.eq('ADM1_NAME', 'San Pedro'))
+  .map(function(f){
+    var geom = f.geometry().intersection(ee.Geometry.Rectangle([-56.5, -25.4, -55.2, -23.3]));
+    return ee.Feature(geom);
+  }).first().geometry();
+var altoParana = dptos.filter(ee.Filter.eq('ADM1_NAME', 'Alto Parana')).first().geometry();
+var canindeyuCompleto = dptos.filter(ee.Filter.eq('ADM1_NAME', 'Canindeyu')).first().geometry();
+var amambaySur = dptos.filter(ee.Filter.eq('ADM1_NAME', 'Amambay'))
+  .map(function(f){
+    var geom = f.geometry().intersection(ee.Geometry.Rectangle([-56.3, -24.2, -55.3, -23.3]));
+    return ee.Feature(geom);
+  }).first().geometry();
+
+var zonas = ee.FeatureCollection([
+  ee.Feature(caaguazuEste, {nombre: 'Caaguazu'}),
+  ee.Feature(itapuaCompleto, {nombre: 'Itapua'}),
+  ee.Feature(caazapaEste, {nombre: 'Caazapa'}),
+  ee.Feature(sanPedroSE, {nombre: 'San Pedro'}),
+  ee.Feature(altoParana, {nombre: 'Alto Parana'}),
+  ee.Feature(canindeyuCompleto, {nombre: 'Canindeyu'}),
+  ee.Feature(amambaySur, {nombre: 'Amambay'})
+]);
+
+// 3. Calcular bosque 2000 y 2022
+var bosque2000 = gfc.select('treecover2000').gte(canopyThresh).selfMask();
+var perdida = gfc.select('lossyear').gte(1).and(gfc.select('lossyear').lte(22));
+var bosque2022 = bosque2000.where(perdida, 0).selfMask();
+
+// 4. Cálculo por zona
+var bosque2000Ha = pixelHa.updateMask(bosque2000);
+var bosque2022Ha = pixelHa.updateMask(bosque2022);
+
+var tabla2000 = bosque2000Ha.reduceRegions({
+  collection: zonas,
+  reducer: ee.Reducer.sum(),
+  scale: 30
+}).map(function(f) {
+  return f.set('bosque_gfw_2000_ha', f.get('sum')).select(['nombre', 'bosque_gfw_2000_ha']);
+});
+
+var tabla2022 = bosque2022Ha.reduceRegions({
+  collection: tabla2000,
+  reducer: ee.Reducer.sum(),
+  scale: 30
+}).map(function(f) {
+  return f.set('bosque_gfw_2022_ha', f.get('sum'));
+});
+
+// 5. Exportar CSV
+Export.table.toDrive({
+  collection: tabla2022,
+  description: 'Bosque_GFW_2000_2022_por_zona',
+  folder: 'EarthEngine',
+  fileNamePrefix: 'bosque_gfw_zonas_baapa',
+  fileFormat: 'CSV'
+});
+
+// 6. Visualización
+Map.centerObject(zonas, 8);
+Map.addLayer(bosque2000.clip(zonas.geometry()), {palette: ['#006400'], min: 1, max: 1}, 'Bosque GFW 2000');
+Map.addLayer(bosque2022.clip(zonas.geometry()), {palette: ['#7CFC00'], min: 1, max: 1}, 'Bosque GFW 2022');
+Map.addLayer(zonas.style({color: 'red', fillColor: '00000000', width: 1.5}), {}, 'Zonas BAAPA');
