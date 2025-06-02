@@ -1,0 +1,61 @@
+import os
+from qgis.core import QgsRasterLayer, QgsVectorLayer, QgsProject
+from qgis.utils import iface
+
+# Ruta base local donde están tus archivos
+ruta_base = r"G:/Mi unidad/CAPAS_EARTH"
+
+# Lista de capas raster (MapBiomas + GFW)
+rasters = [
+    f"bosque_mb_{anio}.tif" for anio in range(2000, 2023)
+] + [
+    "bosque_gfw_2000.tif",
+    "bosque_gfw_2022.tif"
+]
+
+# Cargar capas raster
+for raster in rasters:
+    ruta = os.path.join(ruta_base, raster)
+    if os.path.exists(ruta):
+        capa = QgsRasterLayer(ruta, raster)
+        if capa.isValid():
+            QgsProject.instance().addMapLayer(capa)
+        else:
+            print(f"No se pudo cargar {raster} (raster inválido)")
+    else:
+        print(f"No se encontró: {ruta}")
+
+# Cargar shapefile departamental (opcional)
+shp_dptos = os.path.join(ruta_base, "Dptos_Paraguay.shp")
+if os.path.exists(shp_dptos):
+    vlayer = QgsVectorLayer(shp_dptos, "Departamentos PY", "ogr")
+    if vlayer.isValid():
+        QgsProject.instance().addMapLayer(vlayer)
+    else:
+        print("Shapefile de departamentos inválido")
+
+# Cargar shapefile de referencia (capapaíses)
+shp_paises = os.path.join(ruta_base, "capapaises.shp")
+if os.path.exists(shp_paises):
+    vlayer = QgsVectorLayer(shp_paises, "Países", "ogr")
+    if vlayer.isValid():
+        QgsProject.instance().addMapLayer(vlayer)
+    else:
+        print("Shapefile de países inválido")
+
+# Cargar zonas personalizadas (KML)
+kml_zonas = os.path.join(ruta_base, "zonas_baapa_final.kml")
+if os.path.exists(kml_zonas):
+    kml = QgsVectorLayer(kml_zonas, "Zonas BAAPA", "ogr")
+    if kml.isValid():
+        QgsProject.instance().addMapLayer(kml)
+    else:
+        print("Error al cargar el KML")
+
+print("\nTodas las capas disponibles fueron cargadas correctamente si no hubo errores.")
+
+
+
+
+
+exec(open('G:/Mi unidad/CAPAS_EARTH/cargar_capas.py').read())
