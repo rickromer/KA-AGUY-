@@ -1,5 +1,5 @@
 #KA'AGUY+
-English - gbaapa
+English
 
 This repository contains the scripts of the project "KA'AGUY+ — PARAGUAY REDD+ PROJECT", a carbon credit initiative from the agricultural region of Paraguay.
 
