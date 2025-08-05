@@ -21,7 +21,7 @@ License
 This repository is public to foster technical and scientific collaboration. 
 
 Español - gbaapa
-Este repositorio contiene los scripts del proyecto "Guardabosques del Bosque Atlántico del Alto Paraná", una iniciativa de créditos de carbono en la región agrícola del Paraguay.
+Este repositorio contiene los scripts del proyecto "KA'AGUY+ — PARAGUAY REDD+ PROJECT", una iniciativa de créditos de carbono en la región agrícola del Paraguay.
 
 Descripción
 Este proyecto busca documentar y automatizar los procesos técnicos relacionados con la implementación, monitoreo y verificación de un proyecto de créditos de carbono en el Bosque Atlántico del Alto Paraná. Aquí se encuentran todos los scripts y herramientas utilizados en el trabajo que venimos desarrollando.
@@ -40,9 +40,9 @@ Contenido
 Licencia
 Este repositorio es público para fomentar la colaboración técnica y científica.
 
-Português - gbaapa
+Português
 
-Este repositório contém os scripts do projeto "Guardabosques del Bosque Atlántico del Alto Paraná", uma iniciativa de crédito de carbono na região agrícola do Paraguai.
+Este repositório contém os scripts do projeto "KA'AGUY+ — PARAGUAY REDD+ PROJECT", uma iniciativa de crédito de carbono na região agrícola do Paraguai.
 
 Descrição
 O objetivo do projeto é documentar e automatizar os processos técnicos envolvidos na implementação, monitoramento e verificação de um projeto de crédito de carbono na Floresta Atlântica do Alto Paraná. Aqui estão incluídos todos os scripts e ferramentas desenvolvidos até o momento.
