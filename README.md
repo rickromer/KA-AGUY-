@@ -1,7 +1,7 @@
-# gbaapa
+#KA'AGUY+
 English - gbaapa
 
-This repository contains the scripts of the project "Guardabosques del Bosque Atlántico del Alto Paraná", a carbon credit initiative from the agricultural region of Paraguay.
+This repository contains the scripts of the project "KA'AGUY+ — PARAGUAY REDD+ PROJECT", a carbon credit initiative from the agricultural region of Paraguay.
 
 Description
 This project aims to document and automate the technical processes involved in the implementation, monitoring, and verification of a carbon credit project in the Alto Paraná Atlantic Forest. It includes all the scripts and tools developed as part of our ongoing work.
