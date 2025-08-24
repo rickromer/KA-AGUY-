@@ -1,0 +1,237 @@
+// =============================================
+// ΔBSI (vs. año previo) · SOLO VISUAL
+// UX: Header dentro del menú + botón "Menu" arriba + leyenda + on-demand caching
+// =============================================
+
+// --- Región y máscara de bosque (WorldCover 2020 clase 10)
+var region = ee.FeatureCollection('FAO/GAUL/2015/level1')
+  .filter(ee.Filter.eq('ADM0_NAME','Paraguay'))
+  .filter(ee.Filter.eq('ADM1_NAME','Alto Parana'))
+  .geometry();
+
+var wc2020 = ee.ImageCollection('ESA/WorldCover/v100').first();
+var bosque = wc2020.select('Map').eq(10).selfMask().clip(region);
+
+// --- Parámetros
+var years = [2021, 2022, 2023, 2024];       // Δ vs. año previo
+var U1 = 0.15, U2 = 0.25, U3 = 0.35;        // umbrales ΔBSI
+var C_LEVE = '#FFFF00', C_MOD = '#FFA500', C_SEV = '#FF0000'; // colores leyenda
+
+// --- Mapa base y ocultar controles nativos
+Map.setOptions('SATELLITE');
+try {
+  Map.setControlVisibility({
+    zoomControl:false, mapTypeControl:false, scaleControl:false,
+    streetViewControl:false, fullscreenControl:false,
+    layersControl:false, layerList:false
+  });
+} catch(e) {}
+try { Map.drawingTools().setShown(false); } catch(e) {}
+
+var bosqueLayer = ui.Map.Layer(
+  bosque, {palette:['#34736A'], opacity:1}, 'Bosque WorldCover 2020 (100%)', true
+);
+Map.layers().add(bosqueLayer);
+Map.centerObject(region, 9);
+
+// --- Utilidades RS
+function maskS2sr(img){
+  var scl = img.select('SCL');
+  var mask = scl.neq(3).and(scl.neq(8)).and(scl.neq(9))
+    .and(scl.neq(10)).and(scl.neq(11)).and(scl.neq(6));
+  return img.updateMask(mask);
+}
+function annualComposite(year){
+  var ic = ee.ImageCollection('COPERNICUS/S2_SR')
+    .filterBounds(region).filterDate(year+'-01-01', year+'-12-31')
+    .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 80))
+    .map(maskS2sr).select(['B2','B4','B8','B11','SCL']);
+  return ee.Algorithms.If(ic.size().gt(0),
+    ic.median().select(['B2','B4','B8','B11']).clip(region), null);
+}
+function bsiFrom(img){
+  var B2=img.select('B2'), B4=img.select('B4'),
+      B8=img.select('B8'), B11=img.select('B11');
+  return B11.add(B4).subtract(B8.add(B2))
+           .divide(B11.add(B4).add(B8.add(B2))).rename('BSI');
+}
+
+// --- Caché on-demand (mejor UX de performance)
+var diffByYear = {};    // y -> ee.Image diffBSI
+var layersByYear = {};  // y -> {leve,mod,sev}
+
+function ensureYearLayers(y){
+  if (layersByYear[y]) return;
+  var base = annualComposite(y-1), curr = annualComposite(y);
+  if (!base || !curr) return;
+  base = ee.Image(base).updateMask(bosque);
+  curr = ee.Image(curr).updateMask(bosque);
+  var diff = bsiFrom(curr).subtract(bsiFrom(base)).rename('diffBSI');
+  diffByYear[y] = diff;
+
+  var leve = diff.gt(U1).and(diff.lte(U2)).selfMask();
+  var mod  = diff.gt(U2).and(diff.lte(U3)).selfMask();
+  var sev  = diff.gt(U3).selfMask();
+
+  var lLeve = ui.Map.Layer(leve, {palette:[C_LEVE]}, 'Deg. leve '+y, false);
+  var lMod  = ui.Map.Layer(mod,  {palette:[C_MOD]},  'Deg. mod '+y,  false);
+  var lSev  = ui.Map.Layer(sev,  {palette:[C_SEV]},  'Deg. sev '+y,  false);
+
+  Map.layers().add(lLeve); Map.layers().add(lMod); Map.layers().add(lSev);
+  layersByYear[y] = {leve:lLeve, mod:lMod, sev:lSev};
+}
+
+// ===================== UI / UX =====================
+
+// 1) Contenedor fijo en top-left (TRANSPARENTE + SCROLL si crece)
+var uiRoot = ui.Panel({
+  layout: ui.Panel.Layout.flow('vertical'),
+  style: {
+    position: 'top-left',
+    padding: '0',
+    width: 'auto',
+    height: '70%',                 // << fija altura → si el contenido crece, aparece scroll
+    backgroundColor: 'rgba(0,0,0,0)', // transparente
+    border: '0'
+  }
+});
+Map.add(uiRoot);
+
+// Estado global del menú
+var menuVisible = true;
+
+// 2) Botón "Menu" (transparente, sin fondo ni borde)
+var toggleBtn = ui.Button({
+  label: 'Menu',
+  style: {
+    margin: '6px 0 0 6px',
+    padding: '0 12px',
+    height: '28px',
+    fontSize: '12px',
+    backgroundColor: 'rgba(0,0,0,0)', // << sin fondo
+    color: '#000',
+    border: '0'                        // << sin borde
+  }
+});
+uiRoot.add(toggleBtn);
+
+// 3) Menú (sidebar) — hijo del contenedor, debajo del botón
+var sidebar = ui.Panel({
+  style:{
+    margin:'6px 0 0 6px',
+    padding:'8px',
+    width:'320px', maxWidth:'90%',
+    backgroundColor:'#ffffff',
+    border:'1px solid rgba(0,0,0,0.2)'
+    // sin 'height': el scroll lo maneja uiRoot
+  }
+});
+uiRoot.add(sidebar);
+sidebar.style().set('shown', menuVisible);
+
+// Header dentro del menú (título + subtítulo)
+var headerRow = ui.Panel({layout: ui.Panel.Layout.flow('horizontal')});
+headerRow.add(ui.Label('ΔBSI Degradación', {
+  color:'#000', fontWeight:'bold', fontSize:'12px', margin:'0 6px 0 0'
+}));
+headerRow.add(ui.Label('Alto Paraná - 2021–2024', {
+  color:'#444', fontSize:'11px', margin:'0 0 0 6px'
+}));
+sidebar.add(headerRow);
+
+// Línea divisoria suave
+sidebar.add(ui.Label('', {backgroundColor:'rgba(0,0,0,0.15)', height:'1px', margin:'6px 0 8px 0'}));
+
+// Contenido del menú
+var content = ui.Panel({style:{backgroundColor:'rgba(255,255,255,0)', border:'0', padding:'0'}});
+var labelStyle = {color:'#000', fontSize:'11px'};
+
+// Helper para estilizar controles claros
+function styleControl(c){
+  c.style().set('color','#000');
+  c.style().set('backgroundColor','#f7f7f7');
+  c.style().set('border','1px solid rgba(0,0,0,0.2)');
+  return c;
+}
+
+// Año
+content.add(ui.Label('Año', labelStyle));
+var yearItems = years.map(function(y){return y.toString();});
+var yearSelect = styleControl(ui.Select({items:yearItems, value:yearItems[yearItems.length-1]}));
+content.add(yearSelect);
+
+// Severidades (checkbox)
+content.add(ui.Label('Severidad', labelStyle));
+var cbLeve = ui.Checkbox('Leve', true);
+var cbMod  = ui.Checkbox('Moderada', true);
+var cbSev  = ui.Checkbox('Severa', true);
+cbLeve.style().set('color','#000'); cbMod.style().set('color','#000'); cbSev.style().set('color','#000');
+content.add(cbLeve); content.add(cbMod); content.add(cbSev);
+
+// Leyenda (cuadrados de color + texto)
+content.add(ui.Label('Leyenda', {color:'#000', fontWeight:'bold', fontSize:'11px', margin:'8px 0 2px 0'}));
+function legendItem(color, text){
+  var box = ui.Label('', {backgroundColor: color, width:'12px', height:'12px',
+                          margin:'2px 6px 0 0', border:'1px solid rgba(0,0,0,0.2)'});
+  var lbl = ui.Label(text, {color:'#000', fontSize:'11px'});
+  var row = ui.Panel({layout: ui.Panel.Layout.flow('horizontal')});
+  row.add(box); row.add(lbl);
+  return row;
+}
+content.add(legendItem(C_LEVE, 'Leve'));
+content.add(legendItem(C_MOD,  'Moderada'));
+content.add(legendItem(C_SEV,  'Severa'));
+
+// Opacidades
+content.add(ui.Label('Opacidad degradación', labelStyle));
+var opSev = styleControl(ui.Slider({min:0, max:1, value:1, step:0.05}));
+content.add(opSev);
+
+content.add(ui.Label('Opacidad bosque base', labelStyle));
+var opBosque = styleControl(ui.Slider({min:0, max:1, value:0.5, step:0.05}));
+content.add(opBosque);
+
+// Montar contenido dentro del menú
+sidebar.add(content);
+
+// Asignar el onClick del botón (después de que 'sidebar' existe)
+toggleBtn.onClick(function () {
+  menuVisible = !menuVisible;
+  sidebar.style().set('shown', menuVisible);
+});
+
+// --------- Lógica de actualización (on-demand, performante) ----------
+function update(){
+  var y = parseInt(yearSelect.getValue(), 10);
+  ensureYearLayers(y); // calcula una sola vez por año
+
+  years.forEach(function(yy){
+    var pack = layersByYear[yy]; if (!pack) return;
+    var active = (yy === y), opa = opSev.getValue();
+    pack.leve.setShown(active && cbLeve.getValue()); pack.leve.setOpacity(opa);
+    pack.mod.setShown(active && cbMod.getValue());   pack.mod.setOpacity(opa);
+    pack.sev.setShown(active && cbSev.getValue());   pack.sev.setOpacity(opa);
+  });
+  bosqueLayer.setOpacity(opBosque.getValue());
+}
+
+// Eventos
+yearSelect.onChange(update);
+cbLeve.onChange(update); cbMod.onChange(update); cbSev.onChange(update);
+opSev.onChange(update);  opBosque.onChange(update);
+
+// Inicial
+update();
+
+// Aviso y fuentes (pie del menú)
+var aviso = ui.Label(
+  'Vista indicativa ΔBSI para detección preliminar. No constituye contabilidad ni verificación total.',
+  {fontSize:'10px', color:'#444', margin:'8px 0 2px 0'}
+);
+var fuentes = ui.Label(
+  'Fuentes: Sentinel-2 (Copernicus Open Access) • ESA WorldCover 2020 (Clase 10). ' +
+  'Cálculo: ΔBSI año vs. año previo; umbrales 0.10/0.20/0.30.',
+  {fontSize:'10px', color:'#777', margin:'0 0 6px 0'}
+);
+sidebar.add(aviso);
+sidebar.add(fuentes);
