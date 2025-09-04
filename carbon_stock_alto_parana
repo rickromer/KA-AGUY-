@@ -1,0 +1,94 @@
+// =====================================================================
+//  ALTO PARANÁ · STOCK DE CARBONO “BOSQUE PURO” (300 m)
+//  Usamos AGB global NASA/ORNL + máscara MapBiomas clase 3 ≥ 1 ha 
+//  → Calculamos sólo sobre píxeles 300 m con > 50 % bosque
+// =====================================================================
+
+// 1️⃣ Define región y carga MapBiomas (30 m)
+var region = ee.FeatureCollection('FAO/GAUL/2015/level1')
+                .filter(ee.Filter.eq('ADM0_NAME','Paraguay'))
+                .filter(ee.Filter.eq('ADM1_NAME','Alto Parana'))
+                .geometry();
+
+var mb = ee.Image(
+  'projects/mapbiomas-public/assets/paraguay/collection1/' +
+  'mapbiomas_paraguay_collection1_integration_v1'
+);
+
+// 2️⃣ Máscara de bosque clase 3 ≥ 1 ha a 30 m
+function bosque30m(year) {
+  var band = (year <= 2022) ? 'classification_'+year : 'classification_2022';
+  var b3   = mb.select(band).eq(3);
+  return b3
+    .connectedPixelCount(12, true).gte(12)  // ≥12 px ×30 m ≃1 ha
+    .and(b3)
+    .selfMask()
+    .clip(region);
+}
+var bosque30 = bosque30m(2022);
+
+// 3️⃣ Cálculo de fracción de bosque en ventana 300 m × 300 m
+//    (ventana de radio 150 m, kernel cuadrado)
+var bosqueFrac = bosque30.reduceNeighborhood({
+  reducer: ee.Reducer.mean(),
+  kernel: ee.Kernel.square({radius:150, units:'meters'})
+});
+
+// 4️⃣ Reproyecto esa fracción a la grilla 300 m de AGB
+//    (proyección y escala de NASA/ORNL)
+var agb2010 = ee.ImageCollection('NASA/ORNL/biomass_carbon_density/v1')
+               .select('agb').first();
+
+var bosqueFrac300 = bosqueFrac
+  .reproject({
+    crs: agb2010.projection(),
+    scale: 300
+  });
+
+// 5️⃣ Enmascaro AGB sólo donde fracción de bosque > 0.5
+var agbBosquePuro = agb2010.updateMask(bosqueFrac300.gt(0.5));
+
+// 6️⃣ Calculo el promedio de AGB (Mg C/ha) sobre estos píxeles “puros”
+var stats = agbBosquePuro.reduceRegion({
+  reducer: ee.Reducer.mean(),
+  geometry: region,
+  scale:    300,
+  maxPixels: 1e13
+});
+
+var mgC_ha   = ee.Number(stats.get('agb'));
+var tCO2e_ha = mgC_ha.multiply(44/12);
+
+print('AGB bosque puro (Mg C/ha):',    mgC_ha);
+print('Stock bosque puro (t CO₂e/ha):', tCO2e_ha);
+
+// 7️⃣ (Opcional) Visualización
+Map.centerObject(region, 8);
+Map.addLayer(
+  bosqueFrac300, 
+  {min:0, max:1, palette: ['ffffff','006400']}, 
+  'Fracción bosque 300 m'
+);
+Map.addLayer(
+  agbBosquePuro, 
+  {min:0, max:200}, 
+  'AGB bosque puro (Mg C/ha)'
+);
+
+// 🔸 8️⃣ Muestreo de cada píxel y exportación a CSV
+var samples = agbBosquePuro
+  .select('agb')             // banda con el valor Mg C/ha
+  .sample({
+    region:    region,       // tu geometría de Alto Paraná
+    scale:     300,          // resolución de la imagen
+    projection: agb2010.projection(), // asegura la misma rejilla
+    geometries: true         // incluye la geometría (centro de cada pixel)
+  });
+
+Export.table.toDrive({
+  collection: samples,
+  description: 'AGB_BosquePuro_Pixels_300m',
+  folder:      'deg alto parana',
+  fileFormat: 'CSV'
+});
+
